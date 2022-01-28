@@ -1,0 +1,101 @@
+version: "3.0"
+services:
+  nginx:
+    image: nginx:latest
+    restart: always
+    volumes:
+      - ./public:/var/www/html
+      - ./conf.d:/etc/nginx/conf.d
+      - /home/ubuntu/Demo-CRM:/code 
+      - /home/ubuntu/Demo-CRM/static:/static
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web      
+  
+  web:
+    build: ./
+    command: sh -c "python3 manage.py makemigrations &&
+                    python3 manage.py migrate_schemas &&
+                    python3 manage.py migrate_schemas --shared &&
+                    gunicorn Demo_CRM.wsgi:application --bind 0.0.0.0:${APP_PORT}"
+    volumes:
+      - /home/ubuntu/Demo-CRM:/code
+      - /home/ubuntu/Demo-CRM/static:/static  
+    env_file:
+      - .env
+    image: demo_crm_dev
+    #ports:
+    #  - "8000:8000"
+    expose:
+       - 8000     
+    restart: "always"
+    depends_on:
+      - db
+
+  redis:
+    image: redis:latest
+    container_name: redis_dev
+    ports:
+      - "6379:6379"
+
+  db:
+    restart: always
+    image: postgres_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "5433:${DB_PORT}"
+
+  celery:
+    restart: always
+    build:
+      context: .
+    # command: celery -A Demo_CRM worker -l info && celery -A Demo_CRM beat
+    command: celery -A Demo_CRM worker -l info
+    volumes:
+      - .:/code
+    container_name: celery_dev
+    depends_on:
+      - db
+      - web
+      - redis
+    env_file:
+      - .env
+  
+  celery-beat:
+    restart: always
+    build: .
+    command: celery -A Demo_CRM beat -l info
+    container_name: celery_beat_dev
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - web
+      - redis
+    env_file:
+      - .env
+  flower:
+    build: .
+    command: celery -A Demo_CRM flower --ports=5555
+    container_name: flower_dev
+    ports:
+      - 5556:5555
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - web
+      - redis
+      - celery
+      - celery-beat
+    env_file:
+      - .env
+volumes:
+  postgres_data:
